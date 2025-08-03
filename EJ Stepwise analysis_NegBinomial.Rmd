@@ -1,0 +1,477 @@
+---
+title: "EJ Stepwise Analysis"
+author: "Kellin D Slater/Bonnie N Young"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(tigris)
+library(tidycensus)
+library(tidyverse)
+library(RAQSAPI)
+library(leaflet)
+library(sf)
+#library(leafem)
+library(ggplot2)
+library(stars)
+library(foreach)
+library(knitr)
+library(doParallel)
+library(broom)
+#library(rgdal)
+#library(mapview)
+library(scales)
+library(reshape2)
+library(spaMM)
+library(ggiraph)
+library(patchwork)
+#library(geoR)
+library(stargazer)
+library(spdep)
+library(sp)
+library(MASS) # This is for negative binomial modeling
+library(dplyr)
+#library(rnaturalearth)
+library(tidyr)
+
+ mykey='f2b5ce1ac7322142d38161a00cef4a3f740f9d5e'
+```
+
+
+```{r}
+# Combined ACS 2016-2020 + HMS smoke plume data; cleaned df with N=418 tracts
+df_all <- read_csv("C:/Users/bonyoung/Desktop/FL EJ Sugarcane/Cleaned Data/df_all_25_july_24.csv")
+
+```
+Adding Geometry 
+```{r}
+fl_sgr <- tigris::tracts(state = "FL", county = c("Palm Beach", "Hendry", "Martin", "Glades"))
+# calculate centroid geometry 
+fl_sgr_cent <- fl_sgr %>% 
+  mutate(centroid = st_centroid(geometry))
+# drop unused columns 
+    ## Slight recoding of this with dplyr::select (BNY 9/16/24)
+ fl_sgr_cent <- fl_sgr_cent %>%
+  dplyr::select(INTPTLAT, INTPTLON, geometry, GEOID, centroid)
+#add geometry 
+df_all$GEOID<-df_all$geoid
+df_all<- merge(df_all, fl_sgr_cent, by = "GEOID")  
+df_all$geo_cent<-df_all$geometry
+
+df_all$INTPTLAT_numeric <- as.numeric(df_all$INTPTLAT)
+df_all$INTPTLON_numeric <- as.numeric(df_all$INTPTLON)
+
+```
+Creating population density 
+```{r}
+# Calculate area of each census tract
+df_all$area_sq_km <- st_area(df_all$geometry) / 10^6  # Convert area to square kilometers
+
+# Calculate population density
+df_all$population_density <- df_all$total_pop / df_all$area_sq_km
+
+# % rented units 
+df_all$rented<- (df_all$rented_units/df_all$total_households)*100
+
+```
+
+```{r}
+
+b150_var<- c(edu_less_9 ="B15002_002E")   # Retrieve ACS data using these variables 
+b150 <- tidycensus::get_acs(   geography = "tract",   variables = b150_var,  # Use the defined variables   g
+                               geometry = TRUE,   
+                               key = mykey,  
+                               state = "Florida",   
+                               county = c("Palm Beach", "Hendry", "Martin","Glades"),  
+                               year = 2021 )
+
+df_all$GEOID<-df_all$geoid 
+  df_all<- merge(df_all, b150, by = "GEOID")
+  
+df_all <- df_all[, !grepl("\\.x$", names(df_all))]
+df_all$geometry<-df_all$geometry.y
+
+```
+
+```{r}
+# Slight recoding of this to dplyr::select (BNY, 9/16/24)
+df_all<-df_all %>% 
+  dplyr::select(-geo_cent)
+```
+
+
+## making weights and neighbors: queen & rook
+```{r}
+# Contiguity neighbors - all that share a boundary point
+df_all_q <- poly2nb(df_all$geometry)  #queen contiguity
+df_all_r <- poly2nb(df_all$geometry,queen=F) #rook contiguity
+```
+
+Rook Cont
+```{r}
+# Compute centroids of df_all
+centroids <- st_centroid(df_all$centroid)
+
+# Plot the geometry of df_all
+plot(df_all$geometry, asp = 1)
+
+# Plot the neighbors using centroids
+plot.nb(df_all_q, coords = st_coordinates(centroids), col = "blue", add = TRUE)
+```
+queen cont 
+```{r}
+# Plot the geometry of df_all
+plot(df_all$geometry, asp = 1)
+
+# Plot the neighbors using centroids
+plot.nb(df_all_r, coords = st_coordinates(centroids), col = "green", add = TRUE)
+```
+Creating the adjacency matrix
+```{r}
+
+adj_matrix <-nb2mat(df_all_q, style="B")
+
+```
+
+Select EJ variables for stepwise analysis  
+Remove any tracts with missing (NA) values (n=9)
+```{r}
+
+# Select relevant variables for analysis
+ej_step <- df_all %>% 
+ dplyr::select(total_smoke_days_notr, pop_fem, age_0to19, age_20_64,  age65and_up,  income, less_than_hsd, hsd,  more_than_hsd, other_language, occ_2, occ_3, no_bed, one_bed, two_three_bed, four_or_more_bed, occupied_units, owned_units, rented_units, pop_blk,  pop_c_other, pop_his, pov_50, pov_125, pov_150, pov_185, pov_200, pov_300, pov_400, pov_500, vehicle_non, vehicle_1, vehicle_2, population_density) 
+
+# See any incomplete counties if any NA values
+         ej_step_incomplete <- ej_step[!complete.cases(ej_step),]
+         
+# Remove n=9 tracts with NA values
+         ej_step <- ej_step %>% drop_na()
+         
+# Select population var for summary stat, remove n=9 missing geoid: 
+         ## 12051000602  12085001702  12099002900 12099007100 12099007205 12099007780 12099007840 12099007849 12099008301
+ exclude_geoids <- c("12051000602", "12085001702", "12099002900", "12099007100", 
+                    "12099007205", "12099007780", "12099007840", "12099007849", 
+                    "12099008301")
+
+    # Subset the data, removing rows with the specified GEOIDs
+    df_all_subset <- df_all[!df_all$geoid %in% exclude_geoids, ]
+    
+
+```
+  
+
+### Table: Smoke Outcomes
+Table: PRIMARY OUTCOME: Smoke days by HMS: 2016-2020  
+N=409 census tracts with complete data
+```{r}
+
+### PRIMARY OUTCOME:
+    ## Total Smoke days with NO transport: total_smoke_days_notr * 
+    smoke_days <- ej_step %>%
+      summarise(n = n(),
+                median = median(total_smoke_days_notr),
+                Q1 = quantile(total_smoke_days_notr, c(0.25)),
+                Q3 = quantile(total_smoke_days_notr, c(0.75)),
+                min = min(total_smoke_days_notr),
+                max = max(total_smoke_days_notr))
+    kable (smoke_days, digits = 0, caption = "Total Smoke Days with NO Transport")
+
+    
+      # Smoke intensity
+          # Repull original raw HMS plume data to get summary stats for smoke intensity since they're not in this dataset: 
+          ## # Smoke intensity no transport: total_light_notr    total_mod_notr    total_heavy_notr
+           smoke_intensity <- df_all %>%
+            summarise(n = n(),
+                      median = median(total_heavy_notr),
+                      Q1 = quantile(total_heavy_notr, c(0.25)),
+                      Q3 = quantile(total_heavy_notr, c(0.75)),
+                      min = min(total_heavy_notr),
+                      max = max(total_heavy_notr))
+          kable (smoke_intensity, digits = 0, caption = "Smoke Intensity, NO Transport")
+```
+
+### Table: SES & Demographics
+N=409 census tracts with complete data
+```{r}
+# Sum of total pop for all 409 census tracts
+total_population <- sum(df_all_subset$tot_pop)
+    print(total_population)
+
+# Categorical vars
+# county   
+    cat_var <- df_all_subset %>%
+       group_by(county) %>% 
+      summarise(count=n()) %>% 
+      mutate('%'=count/sum(count)*100)
+    kable (cat_var, digits = 0, caption = "Categorical vars")
+
+# Group by county and calculate sum of tot_pop and tot_units
+    pop_vars <- df_all_subset %>%
+      group_by(county) %>% 
+      summarise(N = sum(tot_units, na.rm = TRUE)) %>%
+      mutate(Percent = (N / sum(N)) * 100)
+    print(pop_vars)
+
+        # Specify the file path to save the CSV
+      file_path <- "C:/Users/bonyoung/Desktop/FL EJ Sugarcane/Cleaned Data/df_all_subset.csv"
+
+        # Save the cleaned data to a CSV file
+      write.csv(df_all_subset, file = file_path)
+    
+    
+# Continuous vars
+    ## All vars for final analysis: total_smoke_days_notr, pop_fem, age_0to19, age_20_64,  age65and_up, less_than_hsd, hsd,  more_than_hsd, pop_blk,  pop_c_other, pop_his, occ_2,     occ_3, no_bed, one_bed, two_three_bed, four_or_more_bed, vehicle_non, vehicle_1, vehicle_2, occupied_units, owned_units, rented_units, other_language,  income, pov_50, pov_125, pov_150, pov_185, pov_200, pov_300, pov_400, pov_500, population_density
+    cont_var <- ej_step %>% 
+      group_by(county) %>% 
+      summarise(n = n(),
+                median = median(pop_fem  ),
+                Q1 = quantile(pop_fem     , c(0.25)),
+                Q3 = quantile(pop_fem    , c(0.75))) 
+               #  min = min(pop_fem   ),
+               # max = max(pop_fem    ))
+    kable (cont_var, digits = 0, caption = "Continuous vars")
+    
+    # FOR PUBLICATION Grouped by County
+      cont_var <- df_all_subset %>% 
+      group_by(county) %>% 
+      summarise(n = n(),
+                median = median(pov_150  ),
+                Q1 = quantile(pov_150     , c(0.25)),
+                Q3 = quantile(pov_150    , c(0.75))) 
+    kable (cont_var, digits = 0, caption = "Continuous vars")
+```
+
+# Primary Model (all census tracts): Negative Binomial due to Overdispersion 
+(n=409)
+Stepwise Analysis with results exported
+```{r}
+# Remove 9 counties (rows) with missing values in ej_step
+    ej_step_clean <- na.omit(ej_step)
+       
+
+# Fit a Negative Binomial model using the cleaned data
+    model_nb <- glm.nb(total_smoke_days_notr ~ ., data = ej_step_clean)
+
+# Perform stepwise regression on the cleaned model (bidirectional because diretion ="both")
+    step_model_nb <- step(model_nb, direction = "both", trace = 0)
+
+# Print the summary of the stepwise model
+    summary(step_model_nb)
+
+# Extract the coefficients table from the summary
+    coefficients_table <- step_model_nb$coefficients
+
+# Convert the coefficients table to a data frame
+    coefficients_df <- as.data.frame(coefficients_table)
+
+# Add row names as a column (to include the variable names)
+    coefficients_df <- tibble::rownames_to_column(coefficients_df, "Variable")
+
+# Round all numeric columns to 4 decimal places
+    coefficients_df[, -1] <- round(coefficients_df[, -1], 4)  # Exclude the first column (Variable)
+
+# Export the coefficients table to a CSV file
+    # write.csv(coefficients_df, "stepwise_negbinomial_model_results_v.19Sep2024.csv", row.names = FALSE)
+```
+
+Rerun final model based on stepwise results above and obtain 95% CI
+This is the model accounting for spatial autocorrelation (spamm_queen)
+```{r}
+nb_model_spammq <- fitme(total_smoke_days_notr ~  
+                                age_20_64+
+                                age65and_up+
+                                income+
+                                less_than_hsd+
+                                hsd+
+                                more_than_hsd+
+                                occ_2+
+                                occ_3+
+                                two_three_bed+
+                                owned_units+
+                                rented_units+
+                                pop_his+
+                                pov_50+
+                                pov_185+
+                                vehicle_non+
+                                vehicle_2+
+                                population_density,
+                             adjMatrix = adj_matrix,
+                     data = df_all, family = 'negbin')
+nb_model_spammq
+
+confint(nb_model_spammq,names(fixef(nb_model_spammq)), boot_args=list(nsim=10, seed=123))
+
+# Calculate and print 95% confidence intervals for the fixed effects
+conf_intervals <- confint(nb_model_spammq, names(fixef(nb_model_spammq)), boot_args = list(nsim = 10, seed = 123))
+
+print(conf_intervals)
+```
+
+Create new df to calculate IQR
+```{r}
+ej_step_retained <- ej_step_clean %>% dplyr::select(
+                                   age_20_64,
+                                age65and_up,
+                                income,
+                                less_than_hsd,
+                                hsd,
+                                more_than_hsd,
+                                occ_2,
+                                occ_3,
+                                two_three_bed,
+                                owned_units,
+                                rented_units,
+                                pop_his,
+                                pov_50,
+                                pov_185,
+                                vehicle_non,
+                                vehicle_2,
+                                population_density)
+```
+
+Calculating IQR
+```{r}
+# Select only numeric columns
+ej_step_iqr <- ej_step_retained[sapply(ej_step_retained, is.numeric)]
+
+# Calculate the IQR for each numeric variable in the data frame, handling NA values
+iqr_values <- apply(ej_step_iqr, 2, function(x) IQR(x, na.rm = TRUE))
+    
+# Convert the IQR values to a data frame
+iqr_df <- data.frame(Variable = names(iqr_values), IQR = round(iqr_values, 0))
+
+# Print the data frame nicely in a table
+kable(iqr_df, caption = "Interquartile Range (IQR) of Numeric Variables")
+
+# Export the data frame to a CSV file
+ # write.csv(iqr_df, "negbinomial_iqr_values_v.19Sep2024.csv", row.names = FALSE)
+```
+
+See Primary Results ouput in shared google drive for IQR adjusted and IRR values
+
+
+
+# Sensivity Analysis Model (only rural census tracts)
+Rural counties (n=54)
+
+```{r}
+# Filter to rural census tracts
+df_sens <- df_all[df_all$county %in% c('Glades County', 'Hendry County', 'Martin County'),]
+```
+
+```{r}
+# Select relevant variables for sens analysis
+ej_step <- df_sens %>% 
+ dplyr::select(total_smoke_days_notr, pop_fem, age_0to19, age_20_64,  age65and_up,  income, less_than_hsd, hsd,  more_than_hsd, other_language, occ_2, occ_3, no_bed, one_bed, two_three_bed, four_or_more_bed, occupied_units, owned_units, rented_units, pop_blk,  pop_c_other, pop_his, pov_50, pov_125, pov_150, pov_185, pov_200, pov_300, pov_400, pov_500, vehicle_non, vehicle_1, vehicle_2, population_density) 
+```
+
+Sensitivity: Stepwise Analysis with results exported
+```{r}
+# Remove 2 counties (rows) with missing values in ej_step
+    sens_ej_step_clean <- na.omit(ej_step)
+       
+
+# Fit a Negative Binomial model using the cleaned data
+    sens_model_nb <- glm.nb(total_smoke_days_notr ~ ., data = sens_ej_step_clean)
+
+# Perform stepwise regression on the cleaned model (bidirectional because diretion ="both")
+    step_model_nb <- step(sens_model_nb, direction = "both", trace = 0)
+
+# Print the summary of the stepwise model
+    summary(step_model_nb)
+
+# Extract the coefficients table from the summary
+    coefficients_table <- step_model_nb$coefficients
+
+# Convert the coefficients table to a data frame
+    coefficients_df <- as.data.frame(coefficients_table)
+
+# Add row names as a column (to include the variable names)
+    coefficients_df <- tibble::rownames_to_column(coefficients_df, "Variable")
+
+# Round all numeric columns to 4 decimal places
+    coefficients_df[, -1] <- round(coefficients_df[, -1], 4)  # Exclude the first column (Variable)
+
+# Export the coefficients table to a CSV file
+    # write.csv(coefficients_df, "sensitivity_stepwise_negbinomial_model_results_v.19Sep2024.csv", row.names = FALSE)
+```
+
+Sensitivity: Rerun final model based on stepwise results above and obtain 95% CI 
+```{r}
+sens_nb_model_spammq <- fitme(total_smoke_days_notr ~  
+                                  less_than_hsd+
+                                  hsd+
+                                  more_than_hsd+
+                                  other_language+
+                                  occ_2+
+                                  two_three_bed+
+                                  four_or_more_bed+
+                                  rented_units+
+                                  pop_blk+
+                                  pop_c_other+
+                                  pop_his+
+                                  pov_50+
+                                  pov_125+
+                                  pov_200+
+                                  pov_300+
+                                  pov_500+
+                                  vehicle_2,
+
+                             adjMatrix = adj_matrix,
+                     data = df_sens, family = 'negbin')
+
+sens_nb_model_spammq
+ 
+
+confint(sens_nb_model_spammq,names(fixef(sens_nb_model_spammq)), boot_args=list(nsim=10, seed=123))
+
+# Calculate and print 95% confidence intervals for the fixed effects
+conf_intervals <- confint(sens_nb_model_spammq, names(fixef(sens_nb_model_spammq)), boot_args = list(nsim = 10, seed = 123))
+
+print(conf_intervals)
+```
+
+Sensitivity: Create new df to calculate IQR
+```{r}
+sens_ej_step_retained <- sens_ej_step_clean %>% dplyr::select(
+                                 less_than_hsd,
+                                  hsd,
+                                  more_than_hsd,
+                                  other_language,
+                                  occ_2,
+                                  two_three_bed,
+                                  four_or_more_bed,
+                                  rented_units,
+                                  pop_blk,
+                                  pop_c_other,
+                                  pop_his,
+                                  pov_50,
+                                  pov_125,
+                                  pov_200,
+                                  pov_300,
+                                  pov_500,
+                                  vehicle_2)
+```
+
+Calculating IQR
+```{r}
+# Select only numeric columns
+sens_ej_step_iqr <- sens_ej_step_retained[sapply(sens_ej_step_retained, is.numeric)]
+
+# Calculate the IQR for each numeric variable in the data frame, handling NA values
+sens_iqr_values <- apply(sens_ej_step_iqr, 2, function(x) IQR(x, na.rm = TRUE))
+    
+# Convert the IQR values to a data frame
+sens_iqr_df <- data.frame(Variable = names(sens_iqr_values), IQR = round(sens_iqr_values, 0))
+
+# Print the data frame nicely in a table
+kable(sens_iqr_df, caption = "Interquartile Range (IQR) of Numeric Variables")
+
+# Export the data frame to a CSV file
+ # write.csv(sens_iqr_df, "sensitivity_negbinomial_iqr_values_v.19Sep2024.csv", row.names = FALSE)
+```
+
+See Sensitivity Analysis Results ouput in shared google drive for IQR adjusted and IRR values
+
+

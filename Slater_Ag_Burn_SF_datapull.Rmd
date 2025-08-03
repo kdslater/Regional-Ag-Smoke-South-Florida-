@@ -1,0 +1,730 @@
+---
+title: "EJ_spatial regression data pull july "
+author: "Kellin D Slater"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tigris)
+library(tidycensus)
+library(tidyverse)
+library(RAQSAPI)
+library(leaflet)
+library(sf)
+#library(leafem)
+library(ggplot2)
+library(stars)
+library(foreach)
+library(knitr)
+library(doParallel)
+library(broom)
+#library(rgdal)
+#library(mapview)
+library(scales)
+library(reshape2)
+aqs_credentials(username="james.crooks@cuanschutz.edu",
+                key="carmelfox91")
+
+
+ #mykey=census_api_key("f2b5ce1ac7322142d38161a00cef4a3f740f9d5e", install = TRUE)
+ mykey='f2b5ce1ac7322142d38161a00cef4a3f740f9d5e'
+```
+
+```{r}
+PVs<-load_variables(year = 2021, dataset = "acs5/subject") %>%
+
+separate(label, into = paste0("label", 1:9), sep = "!!", fill = "right", remove = FALSE)
+```
+
+```{r}
+s1701_variables <- load_variables(2019, "acs5", cache = TRUE)
+
+#separate(label, into = paste0("label", 1:9), sep = "!!", fill = "right", remove = FALSE)
+```
+
+```{r}
+# Load ACS variables for the 2020 ACS 5-year estimates
+bed_variables <- load_variables(2020, "acs5", cache = TRUE)
+
+# Print the variables related to bedrooms
+#print(variables[grep("bedroom", variables$label, ignore.case = TRUE), ])
+```
+
+```{r}
+all_var<- c(tot_pop= "DP05_0001P",
+            total_pop = "B01003_001",
+            total_pov_1 = "B17001_002",
+          pop_male= "DP05_0002P",
+            pop_male_est= "DP05_0002E",
+               pop_fem= "DP05_0003P",
+            pop_fem_est= "DP05_0003E",
+               pop_blk= "DP05_0038P",
+            pop_blk_est= "DP05_0038E",
+               pop_wht= "DP05_0037P",
+            pop_wht_est= "DP05_0037E",
+               pop_indig= "DP05_0039P",
+            pop_indig_e= "DP05_0039E",
+               pop_asi= "DP05_0044P",
+            pop_asi_est= "DP05_0044E",
+               pop_hpi= "DP05_0045P",
+            pop_hpi_est= "DP05_0045E",
+               pop_other= "DP05_0052P",
+            pop_other_est= "DP05_0052E",
+               pop_2or_m= "DP05_0057P",
+            pop_2or_m_est= "DP05_0057E",
+               pop_his= "DP05_0071P",
+            pop_his_est= "DP05_0071E",
+               edu_less_9_est= "S1501_C01_007",
+               edu_less_9= "S1501_C02_007",
+               edu_9to12= "S1501_C02_008",
+               edu_9to12_est= "S1501_C01_008",
+               edu_hsd= "S1501_C02_009",
+               edu_hsd_est= "S1501_C01_009",
+               edu_some_col= "S1501_C02_010",
+               edu_some_col_est= "S1501_C01_010",
+               edu_associates= "S1501_C02_011",
+               edu_associates_est= "S1501_C01_011",
+               edu_bach= "S1501_C02_012",
+               edu_bach_est= "S1501_C01_012",
+               edu_grad_prof= "S1501_C02_013",
+               edu_grad_prof_est= "S1501_C01_013",
+              tot_pop= "DP05_0001P",
+        age_5= "DP05_0005P",
+        age_5_est= "DP05_0005",
+        age_5to9= "DP05_0006P",
+        age_5to9_est= "DP05_0006E",
+        age_10to14= "DP05_0007P",
+        age_10to14_est= "DP05_0007E",
+        age_15to19= "DP05_0008P",
+        age_15to19_est= "DP05_0008E",
+        age_20to24= "DP05_0009P",
+        age_20to24_est= "DP05_0009E",
+        age_25to34= "DP05_0010P",
+        age_25to34_est= "DP05_0010E",
+        age_35to44= "DP05_0011P",
+        age_35to44_est= "DP05_0011E",
+        age_45to54= "DP05_0012P",
+        age_45to54_est= "DP05_0012E",
+        age_55to59= "DP05_0013P",
+        age_55to59_est= "DP05_0013E",
+        age_60to64= "DP05_0014P",
+        age_60to64_est= "DP05_0014E",
+        age_65to74= "DP05_0015P",
+        age_65to74_est= "DP05_0015E",
+        age_75to84= "DP05_0016P",
+        age_75to84_est= "DP05_0016E",
+        age_85_up= "DP05_0017P",
+        age_85_up_est= "DP05_0017E",
+         tot_foreign_born= "DP02_0095P",
+        tot_foreign_born_est= "DP02_0095E",
+               pop_native= "B05003_001",
+               us_born= "	S0102PR_C01_055",
+               usborn_abroad= "B05003_003",
+               born_cit= "B15002_007",
+            naturalized= "B05001_003E",
+            not_us_cit= "B05002_021E",
+            non_cit_pop= "B05001_006E",
+            nat_rate= "B05007_001E",
+           # all_vehicles ="DP04_0057",
+            vehicle_non_e= "DP04_0058",
+             vehicle_1_e= "DP04_0059",
+            vehicle_2_e= "DP04_0060" ,
+            vehicle_3or_more_e= "DP04_0061",
+            vehicle_non= "DP04_0058P",
+             #all_vehicles ="DP04_0057P",
+             vehicle_1= "DP04_0059P",
+            vehicle_2= "DP04_0060P" ,
+            vehicle_3or_more= "DP04_0061P",
+            tot_units= "DP04_0002",
+             occupied_units= "DP04_0045P",
+            vacant_units= "DP04_0003P",
+            owned_units= "DP04_0080P",
+            rented_units= "DP04_0047P",
+            tot_units_e= "DP04_0002",
+             occupied_units_e= "DP04_0045",
+            vacant_units_e= "DP04_0003",
+            owned_units_e= "DP04_0080",
+            rented_units_e= "DP04_0047",
+            total_households= "DP02_0001P",
+            avg_household_size= "DP02_0019",
+             english_only= "DP02_0113P",
+            other_language= "DP02_0114P",
+            english_only_e= "DP02_0113",
+            other_language_e= "DP02_0114",
+            med_income_inf= "DP03_0062E",
+             mean_income_inf= "DP03_0063E",
+            med_fam_income_inf= "DP03_0064E",
+            per_cap_income= "DP03_0065E",
+            med_earnings= "DP03_0092E",
+            below_pov= "S0701_C01_049",
+            pov_below_100= "S0701_C01_050",
+            below_pov= "S0701_C01_049",
+            pov_100_149= "S0701_C01_051",
+            pov_50= "S0701_C02_038",
+            pov_125= "S0701_C02_039",
+            pov_150= "S0701_C02_040",
+            pov_185= "S0701_C02_041",
+            pov_200= "S0701_C02_042",
+            pov_300= "S0701_C02_043",
+            pov_400= "S0701_C02_044",  
+            pov_500= "S0701_C02_045",
+            occ_1 = "S2501_C04_006",
+            occ_2 = "S2501_C04_007",
+            occ_3 = "S2501_C04_008",
+            rented_units= "DP04_0047",
+            no_bed = "S2504_C02_021",
+            one_bed = "S2504_C02_022",
+          two_three_bed ="S2504_C02_023",
+          four_or_more_bed="S2504_C02_024"
+        )
+            
+# stepwise regression  
+#pull all poverty variables from S0701 
+  # create a table that looks at poveryt measures by county
+```
+
+            pov_50= "S0701_C02_038",
+            pov_125= "S0701_C02_039",
+            pov_150= "S0701_C02_040",
+            pov_185= "S0701_C02_041",
+            pov_200= "S0701_C02_42",
+            pov_300= "S0701_C02_043",
+            pov_400= "S0701_C02_044",  
+            pov_500= "S0701_C02_045",
+            occ_1 = "S2501_C04_006",
+            occ_2 = "S2501_C04_007",
+            occ_3 = "S2501_C04_007",
+            rented_units= "DP04_0047")
+           
+           
+           rented_units= "DP04_0047"
+           
+```{r}
+options(tigris_use_cache = TRUE)
+# Retrieve ACS data for the specified counties and year
+EAA_21_Full <- tidycensus::get_acs(
+  geography = "tract",
+  variables = all_var,
+  geometry = TRUE,
+  key = mykey,  # Use your API key
+  state = "FL",
+  county = c("Palm Beach", "Hendry", "Martin", "Glades"),
+  year = 2021
+)
+```
+
+```{r}
+EAA_21_Full <- EAA_21_Full %>% 
+  dplyr::select(-moe) %>%
+  spread(key = variable, value = estimate) %>%
+  dplyr::group_by(NAME) 
+```
+
+```{r}
+
+EAA_21_Full<-EAA_21_Full %>% 
+  rename(
+         non_cit_pop_est= "B05001_006",
+         not_us_cit_est= "B05002_021",
+        
+         med_income_inf= "DP03_0062",
+         mean_income_inf= "DP03_0063",
+         med_fam_income_inf= "DP03_0064",
+         per_cap_income= "DP03_0065",
+         med_earnings= "DP03_0092",
+         pop_fem_est= "DP05_0003",
+         age_5to9_est= "DP05_0006", 
+         age_10to14_est= "DP05_0007",
+         age_15to19_est= "DP05_0008",
+         age_20to24_est= "DP05_0009",
+         age_25to34_est= "DP05_0010",
+       
+        age_35to44_est= "DP05_0011",
+      
+        age_45to54_est= "DP05_0012",
+       
+        age_55to59_est= "DP05_0013",
+       
+        age_60to64_est= "DP05_0014",
+     
+        age_65to74_est= "DP05_0015",
+       
+        age_75to84_est= "DP05_0016",
+      
+        age_85_up_est= "DP05_0017",
+        
+          
+        pop_blk_est= "DP05_0038",
+             
+            pop_indig_e= "DP05_0039",
+            
+            pop_asi_est= "DP05_0044",
+         
+            pop_hpi_est= "DP05_0045",
+              
+            pop_other_est= "DP05_0052",
+        pop_his_est= "DP05_0071"
+        )
+  
+```
+
+
+```{r}
+#write_csv(EAA_21_Full, "~/Desktop/EAA_demographics9july24.csv")
+
+```
+
+```{r}
+
+eaa_demo<- EAA_21_Full
+#read_csv( "~/Desktop/EAA_demographics9july24.csv")
+HMS_2016 <- read_csv("~/Desktop/HMS_New4Kellin/FL_census_tract_HMS_2016.csv")
+HMS_2017 <- read_csv("~/Desktop/HMS_New4Kellin/FL_census_tract_HMS_2017.csv")
+
+HMS_2018 <- read_csv("~/Desktop/HMS_New4Kellin/FL_census_tract_HMS_2018.csv")
+
+HMS_2019 <- read_csv("~/Desktop/HMS_New4Kellin/FL_census_tract_HMS_2019.csv")
+HMS_2020<-read_csv("~/Desktop/HMS_New4Kellin/FL_census_tract_HMS_2020.csv")
+```
+
+```{r}
+HMS_2020 <- HMS_2020 %>% 
+  mutate(across(2:432,~recode(.x,"0" = "No Smoke", "1"="Light", "1.5"="Light/tr","2.0"= "Moderate","2.5" = "Moderate/tr", "3.0"="Heavy")))
+
+HMS_2019 <- HMS_2019 %>% 
+  mutate(across(2:432,~recode(.x,"0" = "No Smoke", "1"="Light", "1.5"="Light/tr","2.0"= "Moderate","2.5" = "Moderate/tr", "3.0"="Heavy")))
+
+HMS_2018 <- HMS_2018 %>% 
+  mutate(across(2:432,~recode(.x,"0" = "No Smoke", "1"="Light", "1.5"="Light/tr","2.0"= "Moderate","2.5" = "Moderate/tr", "3.0"="Heavy")))
+
+HMS_2017 <- HMS_2017 %>% 
+  mutate(across(2:432,~recode(.x,"0" = "No Smoke", "1"="Light", "1.5"="Light/tr","2.0"= "Moderate","2.5" = "Moderate/tr", "3.0"="Heavy")))
+
+HMS_2016 <- HMS_2016 %>% 
+  mutate(across(2:432,~recode(.x,"0" = "No Smoke", "1"="Light", "1.5"="Light/tr","2.0"= "Moderate","2.5" = "Moderate/tr", "3.0"="Heavy")))
+
+```
+
+Cleaning HMS 2016
+```{r}
+df_long16 <- pivot_longer(HMS_2016, cols = starts_with("1"), 
+                        names_to = "GEOID", values_to = "Smoke_Days")
+```
+
+```{r}
+df_long16 <- df_long16 %>%
+  filter(!is.na(Smoke_Days))
+```
+
+```{r}
+df_long16<- df_long16 %>% 
+  dplyr::select(-Date)
+```
+
+```{r}
+count_result16 <- df_long16 %>%
+  group_by(GEOID, Smoke_Days) %>%
+  count()
+```
+
+
+
+```{r}
+smokeday_16 <- count_result16 %>%
+  spread(key = Smoke_Days, value = n, fill = 0)
+```
+
+Cleaning HMS 2017
+```{r}
+df_long17 <- pivot_longer(HMS_2017, cols = starts_with("1"), 
+                        names_to = "GEOID", values_to = "Smoke_Days")
+```
+
+```{r}
+df_long17 <- df_long17 %>%
+  filter(!is.na(Smoke_Days))
+```
+
+```{r}
+df_long17<- df_long17 %>% 
+  dplyr::select(-Date)
+```
+
+```{r}
+count_result17 <- df_long17 %>%
+  group_by(GEOID, Smoke_Days) %>%
+  count()
+```
+
+
+```{r}
+smokeday_17<- count_result17 %>%
+  spread(key = Smoke_Days, value = n, fill = 0)
+```
+Cleaning HMS 2018
+```{r}
+df_long18 <- pivot_longer(HMS_2018, cols = starts_with("1"), 
+                        names_to = "GEOID", values_to = "Smoke_Days")
+```
+
+```{r}
+df_long18<- df_long18 %>%
+  filter(!is.na(Smoke_Days))
+```
+
+```{r}
+df_long18<- df_long18 %>% 
+  dplyr::select(-Date)
+```
+
+```{r}
+count_result18 <- df_long18 %>%
+  group_by(GEOID, Smoke_Days) %>%
+  count()
+```
+
+
+```{r}
+smokeday_18<- count_result18 %>%
+  spread(key = Smoke_Days, value = n, fill = 0)
+```
+
+Cleaning HMS 2019
+```{r}
+df_long19 <- pivot_longer(HMS_2019, cols = starts_with("1"), 
+                        names_to = "GEOID", values_to = "Smoke_Days")
+```
+
+```{r}
+df_long19<- df_long19 %>%
+  filter(!is.na(Smoke_Days))
+```
+
+```{r}
+df_long19<- df_long19 %>% 
+  dplyr::select(-Date)
+```
+
+
+```{r}
+count_result19 <- df_long19 %>%
+  group_by(GEOID, Smoke_Days) %>%
+  count()
+```
+
+
+```{r}
+smokeday_19<- count_result19 %>%
+  spread(key = Smoke_Days, value = n, fill = 0)
+```
+
+Cleaning HMS 2020
+```{r}
+df_long20 <- pivot_longer(HMS_2020, cols = starts_with("1"), 
+                        names_to = "GEOID", values_to = "Smoke_Days")
+```
+
+```{r}
+df_long20<- df_long20 %>%
+  filter(!is.na(Smoke_Days))
+```
+
+```{r}
+df_long20<- df_long20 %>% 
+  dplyr::select(-Date)
+```
+
+```{r}
+count_result20<- df_long20 %>%
+  group_by(GEOID, Smoke_Days) %>%
+  count()
+```
+
+
+```{r}
+smokeday_20<- count_result20 %>%
+  spread(key = Smoke_Days, value = n, fill = 0)
+```
+
+```{r}
+EAA_2016<- merge(eaa_demo, smokeday_16, by = "GEOID")
+EAA_2017<- merge(eaa_demo, smokeday_17, by = "GEOID")
+EAA_2018<- merge(eaa_demo, smokeday_18, by = "GEOID")
+EAA_2019<- merge(eaa_demo, smokeday_19, by = "GEOID")
+EAA_2020<- merge(eaa_demo, smokeday_20, by = "GEOID")
+
+```
+
+```{r}
+write_csv(EAA_2016, "~/Desktop/EAA_SMOKE_16_p.csv")
+write_csv(EAA_2017, "~/Desktop/EAA_SMOKE_17_p.csv")
+write_csv(EAA_2018, "~/Desktop/EAA_SMOKE_18_p.csv")
+write_csv(EAA_2019, "~/Desktop/EAA_SMOKE_19_p.csv")
+write_csv(EAA_2020, "~/Desktop/EAA_SMOKE_20_p.csv")
+```
+Import Raw EAA Smoke + ACS Sociodem Datasets
+```{r}
+# 2016
+df_16 <- read_csv("~/Desktop/EAA_SMOKE_16_p.csv")
+
+# 2017
+df_17 <- read_csv("~/Desktop/EAA_SMOKE_17_p.csv")
+
+# 2018
+df_18 <- read_csv("~/Desktop/EAA_SMOKE_18_p.csv")
+
+# 2019
+df_19 <- read_csv("~/Desktop/EAA_SMOKE_19_p.csv")
+
+# 2020
+df_20 <- read_csv("~/Desktop/EAA_SMOKE_20_p.csv")
+```
+
+Change column names to lower case
+```{r}
+
+# Change for each dataset: df_16 df_17 df_18 df_19 df_20
+colnames(df_16) <- tolower(colnames(df_16))
+colnames(df_17) <- tolower(colnames(df_17))
+colnames(df_18) <- tolower(colnames(df_18))
+colnames(df_19) <- tolower(colnames(df_19))
+colnames(df_20) <- tolower(colnames(df_20))
+```
+
+Add _year per smoke column and year variable per dataset
+```{r}
+
+# Change for each dataset: df_16 df_17 df_18 df_19 df_20
+df_16_yr <- df_16 %>%
+  mutate(
+    light_16 = light,
+    light_tr_16 = `light/tr`,
+    moderate_tr_16 = `moderate/tr`,
+    no_smoke_16 = `no smoke`)
+
+df_17_yr <- df_17 %>%
+  mutate(
+    light_17 = light,
+    light_tr_17 = `light/tr`,
+    moderate_17 = moderate,
+    no_smoke_17 = `no smoke`)
+
+df_18_yr <- df_18 %>%
+  mutate(
+    heavy_18 = heavy,
+    light_18 = light,
+    light_tr_18 = `light/tr`,
+    moderate_18 = moderate,
+    no_smoke_18 = `no smoke`)
+
+df_19_yr <- df_19 %>%
+  mutate(
+    heavy_19 = heavy,
+    light_19 = light,
+    light_tr_19 = `light/tr`,
+    moderate_19 = moderate,
+    no_smoke_19 = `no smoke`)
+
+df_20_yr <- df_20 %>%
+  mutate(
+    heavy_20 = heavy,
+    light_20 = light,
+    light_tr_20 = `light/tr`,
+    moderate_20 = moderate,
+    no_smoke_20 = `no smoke`)
+
+# Add a new year column for each dataset
+df_16_yr$year_2016 <- 2016
+df_17_yr$year_2017 <- 2017
+df_18_yr$year_2018 <- 2018
+df_19_yr$year_2019 <- 2019
+df_20_yr$year_2020 <- 2020
+```
+
+Merge 2016-2020 into one Dataset
+```{r}
+# Merge by "geoid"
+df_all <- merge(df_16_yr, df_17_yr, by = "geoid", all = TRUE)
+df_all <- merge(df_all, df_18_yr, by = "geoid", all = TRUE)
+df_all <- merge(df_all, df_19_yr, by = "geoid", all = TRUE)
+df_all <- merge(df_all, df_20_yr, by = "geoid", all = TRUE)
+```
+
+Delete duplicated columns in merged df
+```{r}
+
+# Delete duplicated columns that end in .x or .y
+df_all <- df_all[, !grepl("\\.x$", names(df_all))]
+df_all <- df_all[, !grepl("\\.y$", names(df_all))]
+df_all <- df_all[, !grepl("\\.1$", names(df_all))]
+```
+
+Delete n=13 census tracts with zero population
+```{r}
+df_all <- df_all %>%
+  filter(tot_pop != 0)
+```
+
+Sum all smoke days by individual year: 2016-2020 
+```{r}
+
+## INCLUDING Transport smoke
+# By Year: Sum of smoke days from 2016-2020 including transport
+df_all$total_smoke_days_tr_2016 <- rowSums(df_all[, c( 'light_16', 'light_tr_16' , 'moderate_tr_16')])
+
+df_all$total_smoke_days_tr_2017 <- rowSums(df_all[, c(  'light_17' , 'light_tr_17' , 'moderate_17')])
+
+df_all$total_smoke_days_tr_2018 <- rowSums(df_all[, c( 'heavy_18' , 'light_18' ,'light_tr_18' , 'moderate_18')])
+
+df_all$total_smoke_days_tr_2019 <- rowSums(df_all[, c( 'heavy_19' , 'light_19' , 'light_tr_19' , 'moderate_19')])
+
+df_all$total_smoke_days_tr_2020 <- rowSums(df_all[, c( 'heavy_20' , 'light_20' , 'light_tr_20' , 'moderate_20')])
+
+
+
+## EXCLUDING Transport smoke
+# By Year: Sum of smoke days from 2016-2020 EXCLUDING transport
+# df_all$total_smoke_days_notr_2016 <- rowSums(df_all[, c( 'light_16')])
+
+df_all$total_smoke_days_notr_2017 <- rowSums(df_all[, c( 'light_17' , 'moderate_17')])
+
+df_all$total_smoke_days_notr_2018 <- rowSums(df_all[, c(  'heavy_18' , 'light_18'  , 'moderate_18')])
+
+df_all$total_smoke_days_notr_2019 <- rowSums(df_all[, c('heavy_19' , 'light_19'  , 'moderate_19')])
+
+df_all$total_smoke_days_notr_2020 <- rowSums(df_all[, c( 'heavy_20' , 'light_20' , 'moderate_20')])
+```
+
+Sum all smoke days by combined years: 2016-2020
+```{r}
+
+# Sum of NO smoke days from 2016-2020 
+df_all$total_no_smoke_days <- rowSums(df_all[, c('no_smoke_16', 'no_smoke_17', 'no_smoke_18', 'no_smoke_19', 'no_smoke_20')])
+typeof(df_all$total_no_smoke_days)
+
+
+
+## Total smoke days INCLUDING Transport smoke
+# Sum of smoke days from 2016-2020 including transport
+df_all$total_smoke_days_tr <- rowSums(df_all[, c( 'light_16', 'light_tr_16' , 'moderate_tr_16' ,
+  'light_17' , 'light_tr_17' , 'moderate_17' , 
+  'heavy_18' , 'light_18' ,'light_tr_18' , 'moderate_18' , 
+  'heavy_19' , 'light_19' , 'light_tr_19' , 'moderate_19'  , 
+  'heavy_20' , 'light_20' , 'light_tr_20' , 'moderate_20')])
+typeof(df_all$total_smoke_days_tr)
+
+
+
+## Total smoke days EXCLUDING Transport smoke
+# Sum of smoke days from 2016-2020 EXCLUDING transport
+df_all$total_smoke_days_notr <- rowSums(df_all[, c( 'light_16',
+  'light_17' , 'moderate_17' , 
+  'heavy_18' , 'light_18'  , 'moderate_18' , 
+  'heavy_19' , 'light_19'  , 'moderate_19'  , 
+  'heavy_20' , 'light_20' , 'moderate_20')])
+typeof(df_all$total_smoke_days_notr)
+```
+
+Sum smoke intensity by combined years: 2016-2020
+```{r}
+
+# Sum of NO smoke days from 2016-2020 
+df_all$total_no_smoke_days <- rowSums(df_all[, c('no_smoke_16', 'no_smoke_17', 'no_smoke_18', 'no_smoke_19', 'no_smoke_20')])
+typeof(df_all$total_no_smoke_days)
+
+
+
+## Total smoke days INCLUDING Transport smoke
+# Sum of smoke days from 2016-2020 including transport
+df_all$total_smoke_days_tr <- rowSums(df_all[, c( 'light_16', 'light_tr_16' , 'moderate_tr_16' ,
+  'light_17' , 'light_tr_17' , 'moderate_17' , 
+  'heavy_18' , 'light_18' ,'light_tr_18' , 'moderate_18' , 
+  'heavy_19' , 'light_19' , 'light_tr_19' , 'moderate_19'  , 
+    'heavy_20' , 'light_20' , 'light_tr_20' , 'moderate_20')])
+typeof(df_all$total_smoke_days_tr)
+
+
+
+## Total smoke days EXCLUDING Transport smoke
+# Sum of smoke days from 2016-2020 EXCLUDING transport
+df_all$total_smoke_days_notr <- rowSums(df_all[, c( 'light_16',
+  'light_17' , 'moderate_17' , 
+  'heavy_18' , 'light_18'  , 'moderate_18' , 
+  'heavy_19' , 'light_19'  , 'moderate_19'  , 
+  'heavy_20' , 'light_20' , 'moderate_20')])
+typeof(df_all$total_smoke_days_notr)
+
+df_all$total_light_smoke<-rowSums(df_all[,c( 'light_16',
+  'light_17','light_18','light_19','light_20')])
+
+df_all$total_mod_smoke<-rowSums(df_all[,c(
+  'moderate_17','moderate_18','moderate_19','moderate_20')])
+
+df_all$total_mod_smoke<-rowSums(df_all[,c(
+  'heavy_18','heavy_19','heavy_20')])
+
+```
+
+```{r}
+df_all <- separate(df_all, name, into = c("census_tract", "county", "state"), sep = ",")
+```
+
+```{r}
+df_all$age_0to19<- df_all$age_10to14+df_all$age_5+df_all$age_5to9+df_all$age_15to19
+df_all$age_20_64<-df_all$age_20to24+df_all$age_25to34+df_all$age_35to44+df_all$age_45to54+df_all$age_55to59+df_all$age_60to64
+df_all$age65and_up<-df_all$age_65to74+df_all$age_75to84+df_all$age_85_up
+
+df_all$less_than_hsd<-df_all$edu_9to12+df_all$edu_less_9
+df_all$hsd <-df_all$edu_hsd
+df_all$more_than_hsd<-df_all$edu_some_col+df_all$edu_associates+df_all$edu_bach+df_all$edu_grad_prof
+df_all$pop_c_other<-df_all$pop_asi+df_all$pop_indig+df_all$pop_hpi+df_all$pop_other+df_all$pop_2or_m
+
+df_all$below_pov<-((df_all$total_pov_1/df_all$total_pop)*100)
+df_all$foreign_not_us_cit_p<-((df_all$not_us_cit_est/df_all$total_pop)*100)
+df_all$income<- df_all$med_income_inf/100
+df_all$owned_units<-((df_all$owned_units/df_all$total_pop)*100)
+df_all$tot_foreign_born<-((df_all$tot_foreign_born/df_all$total_pop)*100)
+df_all<-df_all$occupied_units<-((df_all$occupied_units/df_all$total_pop)*100)
+
+
+
+```
+ edu_some_col= "S1501_C02_010",
+               edu_some_col_est= "S1501_C01_010",
+               edu_associates= "S1501_C02_011",
+               edu_associates_est= "S1501_C01_011",
+               edu_bach= "S1501_C02_012",
+               edu_bach_est= "S1501_C01_012",
+               edu_grad_prof
+               
+
+
+```{r}
+df_all <- df_all %>% 
+  select(-geometry)
+
+```
+
+
+te centroid geometry 
+#fl_sgr_cent <- fl_sgr %>% 
+  mutate(centroid = st_centroid(geometry))
+# drop unused columns 
+fl_sgr_cent<-fl_sgr_cent %>% 
+  select(INTPTLAT,INTPTLON,geometry,GEOID,centroid)
+#add geometry 
+#df_all$GEOID<-df_all$geoid
+df_all<- merge(df_all, fl_sgr_cent, by = "GEOID")  
+#df_all$geo_cent<-df_all$geometry
+
+#df_all$INTPTLAT_numeric <- as.numeric(df_all$INTPTLAT)
+#df_all$INTPTLON_numeric <- as.numeric(df_all$INTPTLON)
+
+```{r}
+write_csv(df_all, "~/Desktop/df_all_9_july_24.csv")
+```
+
